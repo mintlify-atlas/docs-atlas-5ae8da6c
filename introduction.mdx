@@ -1,0 +1,74 @@
+---
+title: "What is LangChain Interview Multi-Agents Flow?"
+
+description: "A LangGraph supervisor multi-agent system that automates the full hiring workflow — from resume parsing to interview generation — using a local LLM."
+---
+
+The LangChain Interview Multi-Agents Flow is a LangGraph-powered system that orchestrates nine specialized AI agents to automate every stage of hiring. You provide a candidate's resume and a job description, and the system produces a structured candidate profile, role analysis, interview question sets tailored to HR, technical, and CEO audiences, a final evaluation, and a draft email — all without sending data to an external API.
+
+<Note>
+  This system runs entirely locally — no data leaves your machine when using a local LLM via LM Studio.
+</Note>
+
+## How it works
+
+A central supervisor agent reads the shared `HiringState` after each step and decides which specialized agent to call next. Every agent writes its output back into the state before returning control to the supervisor. The workflow continues until the supervisor sets `next_agent` to `"finished"`.
+
+## The nine agents
+
+| Agent | Node name | Purpose |
+|---|---|---|
+| Supervisor | `supervisor` | Reads current state and routes to the next agent |
+| Resume parser | `resume_parser` | Extracts structured candidate profile from resume text |
+| JD analyzer | `jd_analysis` | Breaks down the job description into key requirements |
+| Matching agent | `matching` | Compares the candidate profile against the JD |
+| Candidate researcher | `candidate_research` | Performs additional background research on the candidate |
+| HR interviewer | `hr_interview` | Generates behavioral and culture-fit questions |
+| Technical interviewer | `technical_interview` | Generates role-specific technical questions |
+| CEO interviewer | `ceo_interview` | Generates strategic and leadership-level questions |
+| Evaluator | `evaluation` | Produces a final hire/no-hire recommendation |
+| Email agent | `email` | Drafts a candidate communication email |
+
+## Inputs and outputs
+
+**Inputs you provide:**
+
+- A resume in PDF format (parsed by PyMuPDF's `fitz` library)
+- A job description as a plain-text `.txt` file
+
+**Outputs the system produces:**
+
+- `candidate_profile` — structured summary of the candidate
+- `jd_analysis` — parsed requirements from the job description
+- `matching_analysis` — fit assessment between candidate and role
+- `research_analysis` — additional background context on the candidate
+- `hr_questions`, `technical_questions`, `ceo_questions` — three tailored interview question sets
+- `evaluation` — final hiring recommendation
+- `email_content` — drafted communication email
+
+## The four stages
+
+<CardGroup cols={2}>
+  <Card title="Parse" icon="file">
+    Resume parser and JD analyzer extract structured data from your input documents.
+  </Card>
+  <Card title="Research and match" icon="magnifying-glass">
+    The matching agent and candidate researcher analyze fit and gather background context.
+  </Card>
+  <Card title="Interview generation" icon="comments">
+    Three interview agents generate tailored questions for HR, technical, and CEO rounds.
+  </Card>
+  <Card title="Evaluate and communicate" icon="paper-plane">
+    The evaluator produces a hiring recommendation and the email agent drafts outreach.
+  </Card>
+</CardGroup>
+
+## Prerequisites
+
+Before running the workflow, make sure you have:
+
+- **Python 3.10 or later** installed
+- **LM Studio** downloaded, with a compatible model (such as `gemma-3-4b-it`) loaded and serving at `http://localhost:1234/v1`
+- **PyMuPDF** (`fitz`) installed — used to extract text from the resume PDF
+
+Ready to run your first hiring workflow? See the [quickstart](/quickstart).

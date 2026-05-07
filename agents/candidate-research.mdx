@@ -1,0 +1,98 @@
+---
+title: "Candidate research agent: strategic interview insights"
+description: "Generates interview focus areas, expected technical depth, leadership expectations, and strategic insights tailored to the specific candidate and job role."
+---
+
+The candidate research agent reads both the `candidate_profile` and `jd_analysis` and produces strategic insights that help interviewers know what to probe and how deep to go. Unlike the matching agent — which scores fit — the research agent focuses on *how* to interview the candidate effectively. Its output, `research_analysis`, feeds directly into the evaluation agent, making the depth of the research analysis a significant factor in the quality of the final recommendation.
+
+## Source code
+
+```python
+from llm import llm
+
+
+def candidate_research_agent(state):
+
+    jd_analysis = state["jd_analysis"]
+
+    candidate_profile = state["candidate_profile"]
+
+    response = llm.invoke(
+        f"""
+        You are a Candidate Research Agent.
+
+        Research likely interview expectations.
+
+        Candidate:
+        {candidate_profile}
+
+        JD Analysis:
+        {jd_analysis}
+
+        Generate:
+        - likely interview focus
+        - expected technical depth
+        - leadership expectations
+        - strategic interview insights
+        - preparation recommendations
+
+        Return structured JSON only.
+        """
+    )
+
+    return {
+        "research_analysis": response.content
+    }
+```
+
+## Inputs
+
+<ParamField path="candidate_profile" type="string" required>
+  The structured JSON profile produced by the resume parser agent.
+</ParamField>
+
+<ParamField path="jd_analysis" type="string" required>
+  The structured JSON analysis produced by the JD analysis agent.
+</ParamField>
+
+## Output
+
+<ResponseField name="research_analysis" type="string">
+  A JSON string containing strategic interview guidance. Read by the evaluation agent when forming the final hiring verdict.
+</ResponseField>
+
+The JSON contains the following fields:
+
+| Field | Description |
+|-------|-------------|
+| `likely_interview_focus` | Topics and domains the interviewers are likely to probe |
+| `expected_technical_depth` | The level of detail and sophistication expected in technical answers |
+| `leadership_expectations` | What leadership or mentoring signals interviewers should look for |
+| `strategic_interview_insights` | High-level observations about the candidate's fit that should shape interview strategy |
+| `preparation_recommendations` | Specific areas the candidate should prepare for, useful for internal calibration |
+
+## Example output
+
+```json
+{
+  "likely_interview_focus": ["Distributed systems", "API design", "Team leadership"],
+  "expected_technical_depth": "Senior-level system design and hands-on Python",
+  "leadership_expectations": "Technical lead with mentoring responsibilities",
+  "strategic_interview_insights": "Candidate shows strong backend experience but limited cloud-native exposure",
+  "preparation_recommendations": ["Brush up on Kubernetes basics", "Prepare system design examples"]
+}
+```
+
+## State diagram
+
+```
+Requires: candidate_profile, jd_analysis
+    ↓
+candidate_research_agent
+    ↓
+Provides: research_analysis
+```
+
+<Tip>
+  The research analysis feeds directly into the evaluation agent — richer insights here lead to a more accurate final evaluation.
+</Tip>

@@ -1,0 +1,178 @@
+---
+title: "Run the multi-agent hiring workflow from start to finish"
+description: "Execute the full multi-agent pipeline against a real resume PDF and job description using app.stream(), and read each agent's output as it streams."
+---
+
+When you run the workflow, LangGraph passes a shared state dictionary through a series of specialist agents orchestrated by the supervisor. Each agent reads the fields it needs, performs its task using the local LLM, and writes its output back to state. The supervisor then inspects the updated state and decides which agent to invoke next. This continues until the email agent completes its draft and the supervisor routes to `finished`. You see each agent's output printed to the terminal in real time as nodes complete — one node at a time, in streaming fashion.
+
+## Prepare and run the workflow
+
+<Steps>
+  <Step title="Prepare inputs">
+    You need two files before running: a resume in PDF format and a job description as a plain `.txt` file. Update the path variables at the top of `main.py` to point to your local files.
+
+    ```python
+    resume_pdf_path = "path/to/resume.pdf"
+    jd_text_path = "path/to/jd.txt"
+    ```
+
+    The `extract_pdf_text` helper (from `src/services/pdf_parsing`) reads the PDF and returns plain text. The JD file is opened and read directly.
+  </Step>
+
+  <Step title="Build the initial state dict">
+    The workflow starts from a fixed initial state. This dict seeds the `HiringState` TypedDict with the raw documents and workflow control fields. Copy this block from `main.py` exactly — the supervisor expects `task`, `resume_text`, `jd_text`, `workflow_stage`, `completed`, and `workflow_history` to be present at startup.
+
+    ```python
+    initial_state = {
+        "task": "Process candidate hiring workflow",
+        "resume_text": resume_text,
+        "jd_text": jd_text,
+        "workflow_stage": "start",
+        "completed": False,
+        "workflow_history": []
+    }
+    ```
+  </Step>
+
+  <Step title="Call app.stream() and iterate events">
+    Pass `initial_state` to `app.stream()`. LangGraph yields one event dict per node execution. Iterate the outer loop to receive events and the inner loop to unpack the node name and its output state.
+
+    ```python
+    final_state = None
+
+    for event in app.stream(initial_state):
+        for node, state in event.items():
+            print(f"\n====================================")
+            print(f"NODE: {node.upper()}")
+            # ... print node-specific fields
+            final_state = state
+    ```
+
+    Each iteration of the outer `for` loop represents one agent completing its work. The inner `event.items()` loop unpacks the single key–value pair inside that event.
+  </Step>
+
+  <Step title="Read node outputs">
+    Inside the inner loop, branch on the `node` name to print the relevant state field. Each agent writes exactly one output field; the supervisor writes `next_agent`. The complete output block from `main.py` is:
+
+    ```python
+    if node == "supervisor":
+        print(f"Next Agent: {state.get('next_agent')}")
+    elif node == "resume_parser":
+        print(state.get("candidate_profile"))
+    elif node == "jd_analysis":
+        print(state.get("jd_analysis"))
+    elif node == "matching":
+        print(state.get("matching_analysis"))
+    elif node == "candidate_research":
+        print(state.get("research_analysis"))
+    elif node == "hr_interview":
+        print(state.get("hr_questions"))
+    elif node == "technical_interview":
+        print(state.get("technical_questions"))
+    elif node == "ceo_interview":
+        print(state.get("ceo_questions"))
+    elif node == "evaluation":
+        print(state.get("evaluation"))
+    elif node == "email":
+        print(state.get("email_content"))
+    ```
+  </Step>
+</Steps>
+
+## Complete main.py source
+
+```python
+import fitz
+from graph.workflow import app
+from src.services.pdf_parsing import extract_pdf_text
+
+
+resume_pdf_path = "path/to/your/resume.pdf"
+jd_text_path = "path/to/your/jd.txt"
+
+# Read Resume
+resume_text = extract_pdf_text(resume_pdf_path)
+
+# Read JD Text
+with open(jd_text_path, "r", encoding="utf-8") as file:
+    jd_text = file.read()
+
+
+initial_state = {
+    "task": "Process candidate hiring workflow",
+    "resume_text": resume_text,
+    "jd_text": jd_text,
+    "workflow_stage": "start",
+    "completed": False,
+    "workflow_history": []
+}
+
+
+# RUN GRAPH
+
+final_state = None
+
+
+for event in app.stream(initial_state):
+
+    for node, state in event.items():
+
+        print(f"\n====================================")
+        print(f"NODE: {node.upper()}")
+
+
+        if node == "supervisor":
+            print(f"Next Agent: {state.get('next_agent')}")
+
+        elif node == "resume_parser":
+            print(state.get("candidate_profile"))
+
+        elif node == "jd_analysis":
+            print(state.get("jd_analysis"))
+
+        elif node == "matching":
+            print(state.get("matching_analysis"))
+
+        elif node == "candidate_research":
+            print(state.get("research_analysis"))
+
+        elif node == "hr_interview":
+            print(state.get("hr_questions"))
+
+        elif node == "technical_interview":
+            print(state.get("technical_questions"))
+
+        elif node == "ceo_interview":
+            print(state.get("ceo_questions"))
+
+        elif node == "evaluation":
+            print(state.get("evaluation"))
+
+        elif node == "email":
+            print(state.get("email_content"))
+
+        final_state = state
+```
+
+## Streaming vs. batch
+
+The workflow streams node-by-node: `app.stream()` yields control back to your loop after each agent finishes, so you see output progressively rather than waiting for the entire pipeline to complete. This is useful for long-running workflows because you can observe which agents succeed, which fields are populated, and whether the supervisor is routing correctly — all in real time. If you prefer to wait for the full result, you can call `app.invoke(initial_state)` instead, which returns the final state dict directly without intermediate events.
+
+## Node output reference
+
+| Node | State field printed |
+|---|---|
+| `supervisor` | `next_agent` — the name of the next agent to invoke |
+| `resume_parser` | `candidate_profile` — structured JSON of parsed resume fields |
+| `jd_analysis` | `jd_analysis` — structured analysis of the job description |
+| `matching` | `matching_analysis` — candidate-to-JD fit scoring and gaps |
+| `candidate_research` | `research_analysis` — background research on the candidate |
+| `hr_interview` | `hr_questions` — 15 HR questions with evaluation criteria |
+| `technical_interview` | `technical_questions` — role-specific technical questions |
+| `ceo_interview` | `ceo_questions` — culture-fit and leadership questions |
+| `evaluation` | `evaluation` — final hire/no-hire recommendation |
+| `email` | `email_content` — drafted email to the candidate or hiring manager |
+
+<Tip>
+Save `final_state` after the loop — it contains all agent outputs in one dict. You can serialize it to JSON for logging, pass it to another system, or inspect individual fields like `final_state["evaluation"]` without re-running the workflow.
+</Tip>

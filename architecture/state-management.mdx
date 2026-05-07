@@ -1,0 +1,118 @@
+---
+title: "HiringState: shared workflow state across all agents"
+description: "How HiringState acts as the central data store for all 9 agents, what each field represents, and how total=False keeps agent outputs loosely coupled."
+---
+
+`HiringState` is the central nervous system of the multi-agent workflow. It is a single `TypedDict` instance that flows through every node in the LangGraph `StateGraph`. Each agent receives the full state, reads only the fields it needs, and returns a partial dict with only the field it produces. LangGraph merges that partial dict back into the shared state before the next node runs. You never manually pass data between agents — the graph handles it entirely through state.
+
+## HiringState definition
+
+The complete type definition lives in `graph/state.py`:
+
+```python
+# graph/state.py
+from typing_extensions import TypedDict
+from typing import Optional
+
+
+class HiringState(TypedDict, total=False):
+
+    # user input
+    task: str
+
+    # raw documents
+    resume_text: str
+    jd_text: str
+
+    # workflow control
+    workflow_stage: str
+    next_agent: str
+
+    # parsed outputs
+    candidate_profile: str
+    jd_analysis: str
+
+    # research + matching
+    matching_analysis: str
+    research_analysis: str
+
+    # interview outputs
+    hr_questions: str
+    technical_questions: str
+    ceo_questions: str
+
+    # final evaluation
+    evaluation: str
+
+    # email output
+    email_content: str
+
+    # workflow status
+    completed: bool
+    error: Optional[str]
+    workflow_history: list[str]
+```
+
+## Field reference
+
+| Field | Type | Written by | Description |
+|---|---|---|---|
+| `task` | `str` | Caller (input) | User-provided task description passed in `initial_state`. |
+| `resume_text` | `str` | Caller (input) | Raw resume text extracted from a PDF before the graph runs. |
+| `jd_text` | `str` | Caller (input) | Raw job description text loaded from a file before the graph runs. |
+| `workflow_stage` | `str` | `supervisor_agent` | Current stage label; updated by the supervisor on each routing decision. |
+| `next_agent` | `str` | `supervisor_agent` | The node name the router should invoke next, or `"finished"` to end. |
+| `candidate_profile` | `str` | `resume_parser_agent` | JSON string containing the structured candidate profile parsed from the resume. |
+| `jd_analysis` | `str` | `jd_analysis_agent` | JSON string containing the structured analysis of the job description. |
+| `matching_analysis` | `str` | `matching_agent` | JSON string comparing the candidate profile against the JD analysis. |
+| `research_analysis` | `str` | `candidate_research_agent` | JSON string summarizing the candidate's background and online presence. |
+| `hr_questions` | `str` | `hr_interview_agent` | JSON string containing generated HR-focused interview questions. |
+| `technical_questions` | `str` | `technical_interview_agent` | JSON string containing generated technical interview questions. |
+| `ceo_questions` | `str` | `ceo_interview_agent` | JSON string containing generated culture-fit and CEO-level interview questions. |
+| `evaluation` | `str` | `evaluation_agent` | JSON string with the final hiring recommendation based on all prior outputs. |
+| `email_content` | `str` | `email_agent` | JSON string containing the drafted email to the candidate or hiring manager. |
+| `completed` | `bool` | Caller (input) | Set to `False` at start; the supervisor routes to `END` when the workflow finishes. |
+| `error` | `Optional[str]` | `supervisor_agent` | Error message written to state if the supervisor fails to parse an LLM response. |
+| `workflow_history` | `list[str]` | `supervisor_agent` | Ordered list of every agent name the supervisor has dispatched; used for loop detection. |
+
+## total=False
+
+`HiringState` is declared with `total=False`, which means every field is optional — no field is required to be present for the TypedDict to be valid. This design allows each agent to return a minimal partial dict containing only the one field it produces, without having to supply default values for all the other fields.
+
+```python
+# An agent only returns what it produced — no need to echo back the rest of state
+def resume_parser_agent(state):
+    # ... parse the resume ...
+    return {"candidate_profile": structured_profile_json}
+```
+
+LangGraph merges this partial dict into the accumulated state, so all previously written fields remain intact.
+
+## Reading state
+
+Agents access state fields using standard dict access patterns. Because `total=False` means a key may be absent, agents that need to handle a missing field use `.get()` with a default value.
+
+```python
+# agents/supervisor.py — reading multiple fields defensively
+history = state.get("workflow_history", [])
+available_data = [key for key, value in state.items() if value and key not in ["task", "next_agent", "workflow_stage", "completed", "error", "workflow_history"]]
+```
+
+## Writing state
+
+Agents return a plain Python dict containing only the key(s) they produce. The supervisor writes three control fields on every invocation:
+
+```python
+# agents/supervisor.py
+return {
+    "next_agent": next_agent,
+    "workflow_stage": next_agent,
+    "workflow_history": new_history
+}
+```
+
+A specialized agent returns only its single output field. LangGraph handles the merge automatically.
+
+<Note>
+  Because total=False, the supervisor checks which fields are present using `[key for key, value in state.items() if value]` to determine what has already been produced.
+</Note>

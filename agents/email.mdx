@@ -1,0 +1,131 @@
+---
+title: "Email agent: draft personalized interviewer emails"
+description: "Generates briefing emails for HR, technical, and CEO interviewers, each with a candidate summary, interview focus areas, and attached materials summary."
+---
+
+The email agent is the final specialist in the pipeline. It takes the completed candidate profile, all three interview question sets, and the hiring evaluation, then drafts three separate emails — one for each interviewer — so every interviewer enters the session with a tailored brief.
+
+## Source code
+
+```python agents/email_agent.py
+from llm import llm
+
+def email_agent(state):
+
+    candidate_profile = state["candidate_profile"]
+    hr_questions = state["hr_questions"]
+    technical_questions = state["technical_questions"]
+    ceo_questions = state["ceo_questions"]
+    evaluation = state["evaluation"]
+
+    response = llm.invoke(
+        f"""
+        You are an Email Communication Agent.
+
+        Generate professional interview emails.
+
+        Candidate:
+        {candidate_profile}
+
+        HR Questions:
+        {hr_questions}
+
+        Technical Questions:
+        {technical_questions}
+
+        CEO Questions:
+        {ceo_questions}
+
+        Evaluation:
+        {evaluation}
+
+        Generate:
+        - HR email
+        - technical interviewer email
+        - CEO interviewer email
+
+        Include:
+        - candidate summary
+        - interview focus
+        - attached materials summary
+
+        Return structured JSON only.
+        """
+    )
+
+    return {
+        "email_content": response.content
+    }
+```
+
+## Inputs and outputs
+
+**Requires:** `candidate_profile`, `hr_questions`, `technical_questions`, `ceo_questions`, `evaluation`
+
+**Provides:** `email_content`
+
+The agent reads five state fields that are all produced by earlier agents. The supervisor ensures all five are present before routing here.
+
+## Output structure
+
+The agent returns `email_content` as a JSON string containing three email objects:
+
+```json
+{
+  "hr_email": {
+    "subject": "Interview Brief: Jane Smith — HR Round",
+    "body": "Hi Sarah,\n\nPlease find below the interview brief for Jane Smith...",
+    "candidate_summary": "Senior Backend Engineer with 5 years of Python and API development experience.",
+    "interview_focus": ["Communication style", "Team conflict handling", "Ownership mindset"],
+    "materials_summary": "Resume and HR question bank (15 questions) attached."
+  },
+  "technical_email": {
+    "subject": "Interview Brief: Jane Smith — Technical Round",
+    "body": "Hi Alex,\n\nHere is the technical interview brief for Jane Smith...",
+    "candidate_summary": "Strong Python backend engineer with system design experience.",
+    "interview_focus": ["System design", "API scalability", "Debugging approach"],
+    "materials_summary": "Resume and 20 technical questions with expected answers attached."
+  },
+  "ceo_email": {
+    "subject": "Interview Brief: Jane Smith — CEO Round",
+    "body": "Hi CEO,\n\nPlease find the culture-fit brief for Jane Smith...",
+    "candidate_summary": "Senior engineer showing strong ownership and strategic thinking.",
+    "interview_focus": ["Long-term vision", "Business impact mindset", "Leadership philosophy"],
+    "materials_summary": "Resume, evaluation summary, and CEO question bank (10 questions) attached."
+  }
+}
+```
+
+## Role in the pipeline
+
+<Tip>
+The email agent is always the last agent called before the workflow ends. Once `email_content` is present in state, the supervisor routes to `"finished"` and the pipeline stops.
+</Tip>
+
+Each email is scoped to one interviewer's perspective:
+
+| Email | Recipient | Focus |
+|---|---|---|
+| `hr_email` | HR interviewer | Behavioral and culture questions |
+| `technical_email` | Technical interviewer | Architecture, coding, and debugging |
+| `ceo_email` | CEO/exec interviewer | Leadership, strategy, and vision |
+
+## Accessing email output
+
+In `main.py`, the email agent's output is printed as:
+
+```python
+elif node == "email":
+    print(state.get("email_content"))
+```
+
+To parse the three emails from `final_state` after the loop completes:
+
+```python
+import json
+
+email_data = json.loads(final_state.get("email_content", "{}"))
+hr_email = email_data.get("hr_email", {})
+technical_email = email_data.get("technical_email", {})
+ceo_email = email_data.get("ceo_email", {})
+```

@@ -1,0 +1,95 @@
+---
+title: "JD analysis agent: extract structured role requirements"
+description: "Extracts structured role title, required and preferred skills, responsibilities, leadership needs, and hiring priorities from a raw job description text."
+---
+
+The JD analysis agent runs in parallel with the resume parser — both can be called as soon as their respective raw inputs are available. It receives the raw job description text and asks the LLM to produce a structured breakdown of what the role requires. The resulting `jd_analysis` field is consumed by the matching agent, both interview question generators, the candidate research agent, and ultimately the evaluation agent.
+
+## Source code
+
+```python
+from llm import llm
+
+
+def jd_analysis_agent(state):
+
+    jd_text = state["jd_text"]
+
+    response = llm.invoke(
+        f"""
+        You are a JD Analysis Agent.
+
+        Analyze this job description deeply.
+
+        Job Description:
+        {jd_text}
+
+        Extract:
+        - role_title
+        - seniority_level
+        - required_skills
+        - preferred_skills
+        - responsibilities
+        - leadership_requirements
+        - hiring_priorities
+
+        Return structured JSON only.
+        """
+    )
+
+    return {
+        "jd_analysis": response.content
+    }
+```
+
+## Input
+
+<ParamField path="jd_text" type="string" required>
+  The raw job description text provided as user input. This is typically copied directly from a job posting.
+</ParamField>
+
+## Output
+
+<ResponseField name="jd_analysis" type="string">
+  A JSON string containing the structured analysis of the job description. Consumed by the matching agent, candidate research agent, all three interview agents, and the evaluation agent.
+</ResponseField>
+
+The JSON contains the following fields:
+
+| Field | Description |
+|-------|-------------|
+| `role_title` | The name of the role being hired for |
+| `seniority_level` | Expected level (e.g., Junior, Senior, Staff, Principal) |
+| `required_skills` | Skills listed as mandatory in the JD |
+| `preferred_skills` | Skills listed as nice-to-have |
+| `responsibilities` | Key duties and accountabilities described in the JD |
+| `leadership_requirements` | Any people management or mentoring expectations |
+| `hiring_priorities` | The LLM's inference of what the hiring team values most |
+
+## LLM prompt
+
+The prompt instructs the LLM to act as a JD Analysis Agent and perform a deep analysis of the provided `jd_text`. It requests all seven fields and asks for structured JSON only, keeping the output machine-readable for downstream agents.
+
+## Example output structure
+
+```json
+{
+  "role_title": "Senior Backend Engineer",
+  "seniority_level": "Senior",
+  "required_skills": ["Python", "REST APIs", "PostgreSQL", "AWS"],
+  "preferred_skills": ["Kubernetes", "Redis", "GraphQL"],
+  "responsibilities": ["Design scalable microservices", "Lead technical reviews"],
+  "leadership_requirements": "Mentor junior engineers",
+  "hiring_priorities": ["System design", "Python expertise", "AWS experience"]
+}
+```
+
+## State diagram
+
+```
+Requires: jd_text
+    ↓
+jd_analysis_agent
+    ↓
+Provides: jd_analysis
+```

@@ -1,0 +1,174 @@
+---
+title: "Workflow graph: nodes, edges, and conditional routing"
+description: "How workflow.py constructs the StateGraph, registers all 10 nodes, sets up the supervisor's conditional router, and compiles the graph into a runnable app."
+---
+
+The workflow graph is the structural backbone of the multi-agent system. It is defined in `graph/workflow.py` using LangGraph's `StateGraph` API. The file registers 10 nodes (one supervisor plus 9 specialized agents), sets the entry point, wires up conditional routing from the supervisor, connects every agent back to the supervisor with unconditional edges, and compiles the graph into a runnable `app` object.
+
+## Graph construction
+
+You create the graph by instantiating `StateGraph` with `HiringState` as the state schema. This tells LangGraph that every node will receive and return values typed against `HiringState`.
+
+```python
+# graph/workflow.py
+from langgraph.graph import StateGraph, END
+from graph.state import HiringState
+
+graph = StateGraph(HiringState)
+```
+
+## Node registration
+
+All 10 nodes are registered with `graph.add_node()`. The first argument is the node name used in routing; the second is the Python function that implements the agent.
+
+```python
+# graph/workflow.py
+graph.add_node("supervisor", supervisor_agent)
+
+graph.add_node("resume_parser", resume_parser_agent)
+
+graph.add_node("jd_analysis", jd_analysis_agent)
+
+graph.add_node("matching", matching_agent)
+
+graph.add_node("candidate_research", candidate_research_agent)
+
+graph.add_node("hr_interview", hr_interview_agent)
+
+graph.add_node("technical_interview", technical_interview_agent)
+
+graph.add_node("ceo_interview", ceo_interview_agent)
+
+graph.add_node("evaluation", evaluation_agent)
+
+graph.add_node("email", email_agent)
+```
+
+## Entry point
+
+The supervisor is declared as the graph's entry point, so it is always the first node to execute when you call `app.stream()`.
+
+```python
+# graph/workflow.py
+graph.set_entry_point("supervisor")
+```
+
+## Router function
+
+The `router` function reads the `next_agent` field from state and returns it as a string. LangGraph uses this return value to look up the destination node in the conditional edges mapping.
+
+```python
+# graph/workflow.py
+def router(state):
+
+    next_agent = state.get("next_agent", "")
+
+    print(f"\n[ROUTER] -> {next_agent}")
+
+    return next_agent
+```
+
+## Conditional edges
+
+`add_conditional_edges` wires the supervisor's output to the correct node. Every legal value of `next_agent` is mapped to a node name. The special value `"finished"` maps to LangGraph's built-in `END` sentinel, which terminates execution.
+
+```python
+# graph/workflow.py
+graph.add_conditional_edges(
+    "supervisor",
+    router,
+    {
+        "resume_parser": "resume_parser",
+        "jd_analysis": "jd_analysis",
+        "matching": "matching",
+        "candidate_research": "candidate_research",
+        "hr_interview": "hr_interview",
+        "technical_interview": "technical_interview",
+        "ceo_interview": "ceo_interview",
+        "evaluation": "evaluation",
+        "email": "email",
+        "finished": END
+    }
+)
+```
+
+## Return edges
+
+Every agent node has an unconditional edge back to the supervisor. This ensures that after any agent writes its output to state, control always returns to the supervisor for the next routing decision.
+
+```python
+# graph/workflow.py
+graph.add_edge("resume_parser", "supervisor")
+
+graph.add_edge("jd_analysis", "supervisor")
+
+graph.add_edge("matching", "supervisor")
+
+graph.add_edge("candidate_research", "supervisor")
+
+graph.add_edge("hr_interview", "supervisor")
+
+graph.add_edge("technical_interview", "supervisor")
+
+graph.add_edge("ceo_interview", "supervisor")
+
+graph.add_edge("evaluation", "supervisor")
+
+graph.add_edge("email", "supervisor")
+```
+
+## Compilation
+
+Calling `graph.compile()` validates the graph structure, resolves all edges, and returns a `CompiledStateGraph` bound to the variable `app`. You import `app` in `main.py` to run the workflow.
+
+```python
+# graph/workflow.py
+app = graph.compile()
+```
+
+## Streaming
+
+<Tabs>
+  <Tab title="Graph definition">
+    The graph is defined once in `workflow.py` and compiled into `app`. You import this object wherever you need to run the workflow.
+
+    ```python
+    # graph/workflow.py
+    from langgraph.graph import StateGraph, END
+    from graph.state import HiringState
+
+    graph = StateGraph(HiringState)
+    # ... add nodes, edges, entry point ...
+    app = graph.compile()
+    ```
+  </Tab>
+  <Tab title="Running the graph">
+    You build an `initial_state` dict with the required input fields, then pass it to `app.stream()`. The call returns a generator that yields one event per node execution. Each event is a dict mapping the node name to the partial state it returned.
+
+    ```python
+    # main.py
+    from graph.workflow import app
+
+    initial_state = {
+        "task": "Process candidate hiring workflow",
+        "resume_text": resume_text,
+        "jd_text": jd_text,
+        "workflow_stage": "start",
+        "completed": False,
+        "workflow_history": []
+    }
+
+    final_state = None
+
+    for event in app.stream(initial_state):
+        for node, state in event.items():
+            print(f"\n====================================")
+            print(f"NODE: {node.upper()}")
+            final_state = state
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+  The compiled app is a reusable object — you can call app.stream() multiple times with different initial states.
+</Tip>

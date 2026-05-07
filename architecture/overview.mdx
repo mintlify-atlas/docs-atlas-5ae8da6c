@@ -1,0 +1,131 @@
+---
+title: "System architecture of the multi-agent hiring flow"
+description: "A LangGraph StateGraph with a supervisor-agent pattern coordinates 9 specialist agents through shared HiringState to run an automated hiring evaluation."
+---
+
+The LangChain Interview Multi-Agents Flow is built on a LangGraph `StateGraph` that implements a supervisor-agent pattern. A single supervisor node acts as the orchestrator: it inspects the current workflow state, decides which agent to invoke next, and routes control back to itself after every agent completes. All 9 specialized agents are nodes in the same graph, and they share a single `HiringState` TypedDict that carries every input and output through the pipeline.
+
+<CardGroup cols={3}>
+  <Card title="Input layer" icon="file">
+    Raw resume text extracted from a PDF and a plaintext job description are loaded into `HiringState` before the graph runs.
+  </Card>
+  <Card title="Processing layer" icon="microchip">
+    Nine agents — resume parser, JD analysis, matching, candidate research, HR interview, technical interview, CEO interview, evaluation, and email — each read from state and write exactly one output field back.
+  </Card>
+  <Card title="Output layer" icon="envelope">
+    A final evaluation JSON and a drafted candidate or hiring-manager email are the terminal outputs. The supervisor routes to `END` once `email_content` is present in state.
+  </Card>
+</CardGroup>
+
+## Supervisor-agent pattern
+
+The supervisor is the entry point of the graph and every agent unconditionally returns to it after completing its work. This creates a hub-and-spoke topology: the supervisor is the hub, and each of the 9 agents is a spoke.
+
+```python
+# graph/workflow.py
+graph.set_entry_point("supervisor")
+
+# Every agent returns control to the supervisor
+graph.add_edge("resume_parser", "supervisor")
+graph.add_edge("jd_analysis", "supervisor")
+graph.add_edge("matching", "supervisor")
+graph.add_edge("candidate_research", "supervisor")
+graph.add_edge("hr_interview", "supervisor")
+graph.add_edge("technical_interview", "supervisor")
+graph.add_edge("ceo_interview", "supervisor")
+graph.add_edge("evaluation", "supervisor")
+graph.add_edge("email", "supervisor")
+```
+
+When the supervisor runs, it reads the current state, calls an LLM with a structured prompt that includes the agent registry and what data is already available, and returns a `next_agent` value. The `router` function reads that value and the conditional edges map it to the correct node — or to `END` when the value is `"finished"`.
+
+## Agent registry
+
+The supervisor knows the purpose, required inputs, and output of each agent through a statically defined `agents_info` dict in `supervisor.py`. This dict is serialized to JSON and passed directly to the LLM so the supervisor can reason about which agents have all their prerequisites satisfied.
+
+```python
+# agents/supervisor.py
+agents_info = {
+    "resume_parser": {
+        "purpose": "Parses raw resume text into a structured profile.",
+        "requires": ["resume_text"],
+        "provides": ["candidate_profile"]
+    },
+    "jd_analysis": {
+        "purpose": "Analyzes raw job description text.",
+        "requires": ["jd_text"],
+        "provides": ["jd_analysis"]
+    },
+    "matching": {
+        "purpose": "Matches candidate profile against JD analysis.",
+        "requires": ["candidate_profile", "jd_analysis"],
+        "provides": ["matching_analysis"]
+    },
+    "candidate_research": {
+        "purpose": "Researches the candidate's background and online presence.",
+        "requires": ["candidate_profile"],
+        "provides": ["research_analysis"]
+    },
+    "hr_interview": {
+        "purpose": "Generates HR-related interview questions.",
+        "requires": ["candidate_profile", "jd_analysis"],
+        "provides": ["hr_questions"]
+    },
+    "technical_interview": {
+        "purpose": "Generates technical interview questions.",
+        "requires": ["candidate_profile", "jd_analysis"],
+        "provides": ["technical_questions"]
+    },
+    "ceo_interview": {
+        "purpose": "Generates CEO/Culture fit interview questions.",
+        "requires": ["candidate_profile", "jd_analysis"],
+        "provides": ["ceo_questions"]
+    },
+    "evaluation": {
+        "purpose": "Provides a final hiring evaluation based on all gathered data.",
+        "requires": ["matching_analysis", "research_analysis", "hr_questions", "technical_questions", "ceo_questions"],
+        "provides": ["evaluation"]
+    },
+    "email": {
+        "purpose": "Drafts an email to the candidate or hiring manager based on the evaluation.",
+        "requires": ["evaluation", "candidate_profile"],
+        "provides": ["email_content"]
+    }
+}
+```
+
+## Data flow
+
+All state flows through `HiringState`, a `TypedDict` defined in `graph/state.py`. Every agent receives the full state dict, reads the fields it needs, and returns a partial dict containing only the field it produces. LangGraph merges that partial dict back into the shared state before the next node runs.
+
+## Loop detection
+
+The supervisor includes a guardrail mechanism to prevent infinite loops. Every time the supervisor selects an agent, it appends the agent's name to `workflow_history`. On each subsequent supervisor invocation, it counts how many times each agent appears in that list.
+
+```python
+# agents/supervisor.py
+call_counts = {}
+for agent in history:
+    call_counts[agent] = call_counts.get(agent, 0) + 1
+
+flagged_agents = [agent for agent, count in call_counts.items() if count >= 3]
+```
+
+If any agent has been called 3 or more times and its output field is still absent from state, the supervisor forces `next_agent` to `"finished"`, bypassing the LLM decision entirely, and the router sends the graph to `END`.
+
+## Execution model
+
+You run the workflow by calling `app.stream(initial_state)`. LangGraph executes each node one at a time and yields an event dict after every node completes. Each event maps the node name to the partial state that node returned.
+
+```python
+# main.py
+for event in app.stream(initial_state):
+    for node, state in event.items():
+        print(f"\nNODE: {node.upper()}")
+```
+
+This lets you observe intermediate results — for example, the parsed resume profile or generated interview questions — as each agent finishes, without waiting for the entire workflow to complete.
+
+<Note>
+  All agents share a single HiringState instance. Each agent reads the fields it needs and writes exactly one output field back to state.
+</Note>

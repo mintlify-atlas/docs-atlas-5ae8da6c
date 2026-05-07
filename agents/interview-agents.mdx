@@ -1,0 +1,349 @@
+---
+title: "HR, Technical, and CEO interview question generators"
+description: "Three agents generate tailored question banks for each hiring round, with distinct focus areas, evaluation criteria, and structured JSON output formats."
+---
+
+The pipeline includes three interview agents, one for each hiring round. All three share the same input requirements (`candidate_profile` and `jd_analysis`) and can be called in any order after those two fields are available. Each agent produces a structured question bank optimized for its round: HR focuses on behavioral and cultural signals, Technical on depth and problem-solving, and CEO on leadership and strategic thinking. Their outputs flow into both the evaluation agent and the email agent.
+
+<Tabs>
+  <Tab title="HR interview">
+
+## HR interview agent
+
+The HR interview agent generates 15 behavioral and situational questions tailored to the candidate's background and the role's expectations. It also produces evaluation criteria for each focus area and a list of red flags to watch for during the interview.
+
+### Source code
+
+```python
+from llm import llm
+
+
+def hr_interview_agent(state):
+
+    candidate_profile = state["candidate_profile"]
+
+    jd_analysis = state["jd_analysis"]
+
+    response = llm.invoke(
+        f"""
+        You are an HR Interview Agent.
+
+        Generate personalized HR interview questions.
+
+        Candidate:
+        {candidate_profile}
+
+        JD:
+        {jd_analysis}
+
+        Focus Areas:
+        - communication
+        - teamwork
+        - conflict handling
+        - ownership
+        - motivation
+        - adaptability
+
+        Generate:
+        - 15 HR questions
+        - evaluation criteria
+        - red flags
+
+        Return structured JSON only.
+        """
+    )
+
+    return {
+        "hr_questions": response.content
+    }
+```
+
+### Inputs
+
+<ParamField path="candidate_profile" type="string" required>
+  The structured JSON profile produced by the resume parser agent.
+</ParamField>
+
+<ParamField path="jd_analysis" type="string" required>
+  The structured JSON analysis produced by the JD analysis agent.
+</ParamField>
+
+### Output
+
+<ResponseField name="hr_questions" type="string">
+  A JSON string containing 15 HR questions, evaluation criteria per focus area, and a list of red flags. Read by the evaluation agent and the email agent.
+</ResponseField>
+
+### Focus areas
+
+| Area | What to probe |
+|------|--------------|
+| Communication | Clarity, structure, and confidence in articulating ideas |
+| Teamwork | Collaboration patterns and cross-functional experience |
+| Conflict handling | How the candidate navigates disagreements with peers or managers |
+| Ownership | Accountability for outcomes, including failures |
+| Motivation | What drives the candidate and whether it aligns with the role |
+| Adaptability | Response to change, ambiguity, and shifting priorities |
+
+### Example output
+
+```json
+{
+  "questions": [
+    {
+      "question": "Describe a time you handled a difficult team conflict.",
+      "focus": "conflict handling"
+    },
+    {
+      "question": "Tell me about a project where you took ownership of a failing initiative.",
+      "focus": "ownership"
+    }
+  ],
+  "evaluation_criteria": {
+    "communication": "Clear and structured responses",
+    "ownership": "Takes responsibility without deflecting blame"
+  },
+  "red_flags": ["Blames teammates", "No ownership of failures"]
+}
+```
+
+### State diagram
+
+```
+Requires: candidate_profile, jd_analysis
+    ↓
+hr_interview_agent
+    ↓
+Provides: hr_questions
+```
+
+  </Tab>
+  <Tab title="Technical interview">
+
+## Technical interview agent
+
+The technical interview agent generates 20 in-depth technical questions calibrated to the candidate's skills and the role's requirements. Each question comes with an expected answer, a follow-up question, and a difficulty rating — giving the technical interviewer a complete interview guide.
+
+### Source code
+
+```python
+from llm import llm
+
+
+def technical_interview_agent(state):
+
+    candidate_profile = state["candidate_profile"]
+
+    jd_analysis = state["jd_analysis"]
+
+    response = llm.invoke(
+        f"""
+        You are a Principal Technical Interview Agent.
+
+        Generate highly relevant technical interview questions.
+
+        Candidate:
+        {candidate_profile}
+
+        JD:
+        {jd_analysis}
+
+        Focus Areas:
+        - architecture
+        - coding
+        - debugging
+        - scalability
+        - cloud
+        - databases
+        - APIs
+        - distributed systems
+
+        Generate:
+        - 20 technical questions
+        - expected answers
+        - follow-up questions
+        - difficulty ratings
+
+        Return structured JSON only.
+        """
+    )
+
+    return {
+        "technical_questions": response.content
+    }
+```
+
+### Inputs
+
+<ParamField path="candidate_profile" type="string" required>
+  The structured JSON profile produced by the resume parser agent.
+</ParamField>
+
+<ParamField path="jd_analysis" type="string" required>
+  The structured JSON analysis produced by the JD analysis agent.
+</ParamField>
+
+### Output
+
+<ResponseField name="technical_questions" type="string">
+  A JSON string containing 20 technical questions, each with an expected answer, follow-up question, and difficulty rating. Read by the evaluation agent and the email agent.
+</ResponseField>
+
+### Focus areas
+
+| Area | What to probe |
+|------|--------------|
+| Architecture | System design, component boundaries, and trade-offs |
+| Coding | Language proficiency and problem-solving approach |
+| Debugging | Systematic diagnosis of failures in production systems |
+| Scalability | Designing for load, throughput, and fault tolerance |
+| Cloud | Cloud-native patterns, managed services, and deployment strategies |
+| Databases | Schema design, query optimization, and consistency models |
+| APIs | REST, GraphQL, and API contract design |
+| Distributed systems | Consensus, partitioning, replication, and eventual consistency |
+
+### Example output
+
+```json
+{
+  "questions": [
+    {
+      "question": "Design a rate limiter for a high-traffic API",
+      "expected_answer": "Token bucket or sliding window algorithm...",
+      "follow_up": "How would you make it distributed?",
+      "difficulty": "Hard"
+    },
+    {
+      "question": "How would you diagnose a sudden spike in database query latency?",
+      "expected_answer": "Check slow query logs, index usage, connection pool saturation...",
+      "follow_up": "How would you prevent this from recurring?",
+      "difficulty": "Medium"
+    }
+  ]
+}
+```
+
+### State diagram
+
+```
+Requires: candidate_profile, jd_analysis
+    ↓
+technical_interview_agent
+    ↓
+Provides: technical_questions
+```
+
+  </Tab>
+  <Tab title="CEO interview">
+
+## CEO interview agent
+
+The CEO interview agent generates 10 executive-level questions focused on leadership philosophy, ownership, business thinking, and long-term vision. It also produces leadership evaluation criteria, behavioral indicators that signal strong leadership potential, and red flags to watch for.
+
+### Source code
+
+```python
+from llm import llm
+
+
+def ceo_interview_agent(state):
+
+    candidate_profile = state["candidate_profile"]
+
+    jd_analysis = state["jd_analysis"]
+
+    response = llm.invoke(
+        f"""
+        You are a CEO Interview Agent.
+
+        Generate executive-level interview questions.
+
+        Candidate:
+        {candidate_profile}
+
+        JD:
+        {jd_analysis}
+
+        Focus Areas:
+        - leadership
+        - ownership
+        - business thinking
+        - strategic thinking
+        - long-term vision
+
+        Generate:
+        - 10 CEO round questions
+        - leadership evaluation criteria
+        - behavioral indicators
+        - red flags
+
+        Return structured JSON only.
+        """
+    )
+
+    return {
+        "ceo_questions": response.content
+    }
+```
+
+### Inputs
+
+<ParamField path="candidate_profile" type="string" required>
+  The structured JSON profile produced by the resume parser agent.
+</ParamField>
+
+<ParamField path="jd_analysis" type="string" required>
+  The structured JSON analysis produced by the JD analysis agent.
+</ParamField>
+
+### Output
+
+<ResponseField name="ceo_questions" type="string">
+  A JSON string containing 10 CEO-round questions, leadership evaluation criteria, behavioral indicators, and red flags. Read by the evaluation agent and the email agent.
+</ResponseField>
+
+### Focus areas
+
+| Area | What to probe |
+|------|--------------|
+| Leadership | How the candidate influences, motivates, and develops others |
+| Ownership | Accountability for organizational outcomes, not just individual deliverables |
+| Business thinking | Awareness of how engineering decisions affect business metrics |
+| Strategic thinking | Ability to reason about multi-quarter trade-offs and priorities |
+| Long-term vision | Whether the candidate's goals align with the company's direction |
+
+### Example output
+
+```json
+{
+  "questions": [
+    {
+      "question": "How do you decide when to take technical debt?",
+      "focus": "strategic thinking"
+    },
+    {
+      "question": "Describe a time you had to make a decision with incomplete information under time pressure.",
+      "focus": "ownership"
+    }
+  ],
+  "leadership_evaluation_criteria": {
+    "ownership": "Takes full accountability for team outcomes",
+    "strategic thinking": "Articulates clear trade-offs with business context"
+  },
+  "behavioral_indicators": ["Speaks about team impact, not just individual", "References business outcomes when discussing technical decisions"],
+  "red_flags": ["Only discusses personal achievements", "Avoids accountability for past failures"]
+}
+```
+
+### State diagram
+
+```
+Requires: candidate_profile, jd_analysis
+    ↓
+ceo_interview_agent
+    ↓
+Provides: ceo_questions
+```
+
+  </Tab>
+</Tabs>

@@ -1,0 +1,105 @@
+---
+title: "Configure the LLM model, endpoint, and input paths"
+description: "Adjust the LLM model, base URL, temperature, and input file paths to match your local environment and the candidate documents you want to process."
+---
+
+The project has two configuration surfaces: `llm.py`, which controls how the agents connect to the language model, and `main.py`, which sets the input file paths and the initial workflow state. You need to edit both before running the workflow for the first time.
+
+## LLM configuration (`llm.py`)
+
+All nine agents share a single `ChatOpenAI` instance defined in `llm.py`. The file uses LangChain's `ChatOpenAI` class pointed at a locally running LM Studio server, so no API key or external network access is required.
+
+```python llm.py
+from langchain_openai import ChatOpenAI
+
+llm = ChatOpenAI(
+    model="gemma-3-4b-it",
+    base_url="http://localhost:1234/v1",
+    api_key="lm-studio",
+    temperature=0.3,
+    streaming=True
+)
+```
+
+<Note>
+  The `api_key` field is required by LangChain's `ChatOpenAI` but LM Studio does not validate it — any non-empty string works.
+</Note>
+
+### Parameters
+
+<ParamField path="model" type="string" default='"gemma-3-4b-it"'>
+  The model identifier to request from the LM Studio server. This must match the model name shown in LM Studio's **Local Server** tab exactly. Change this whenever you switch to a different model.
+</ParamField>
+
+<ParamField path="base_url" type="string" default='"http://localhost:1234/v1"'>
+  The base URL of the OpenAI-compatible server. LM Studio defaults to port `1234`. If you changed the port in LM Studio settings, update this value to match.
+</ParamField>
+
+<ParamField path="api_key" type="string" default='"lm-studio"'>
+  A placeholder API key. LM Studio accepts any non-empty string. If you point `base_url` at a real OpenAI-compatible cloud endpoint instead, replace this with your actual API key.
+</ParamField>
+
+<ParamField path="temperature" type="number" default="0.3">
+  Controls output randomness. Lower values (closer to `0`) make responses more deterministic and focused; higher values (up to `2.0`) increase creativity and variation. `0.3` is suitable for structured hiring outputs.
+</ParamField>
+
+<ParamField path="streaming" type="boolean" default="true">
+  Enables token-by-token streaming from the LLM. When `True`, responses begin printing as soon as generation starts. Set to `False` if you want to receive the full response before processing it.
+</ParamField>
+
+## Input configuration (`main.py`)
+
+The entry point reads two files from disk before building the initial workflow state. Update the two path variables at the top of `main.py` to point at your files:
+
+```python main.py
+resume_pdf_path = "path/to/your/resume.pdf"
+jd_text_path = "path/to/your/job_description.txt"
+```
+
+<ParamField path="resume_pdf_path" type="string" required>
+  Absolute path to the candidate's resume in PDF format. The `extract_pdf_text` utility opens this file with PyMuPDF (`fitz`) and concatenates the text content of every page.
+</ParamField>
+
+<ParamField path="jd_text_path" type="string" required>
+  Absolute path to the job description as a plain-text UTF-8 file. The file is read in full and passed directly to the `jd_text` state field.
+</ParamField>
+
+## Initial state configuration
+
+`main.py` builds the `initial_state` dictionary that seeds the `HiringState` TypedDict before the first supervisor call:
+
+```python main.py
+initial_state = {
+    "task": "Process candidate hiring workflow",
+    "resume_text": resume_text,
+    "jd_text": jd_text,
+    "workflow_stage": "start",
+    "completed": False,
+    "workflow_history": []
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `task` | `str` | Human-readable description of the workflow goal, visible to agents |
+| `resume_text` | `str` | Auto-populated from `extract_pdf_text(resume_pdf_path)` |
+| `jd_text` | `str` | Auto-populated by reading `jd_text_path` |
+| `workflow_stage` | `str` | Set to `"start"` to signal the supervisor to begin from the first agent |
+| `completed` | `bool` | Set to `False`; the supervisor sets this to `True` when the workflow finishes |
+| `workflow_history` | `list[str]` | Empty list; agents append entries as the workflow progresses |
+
+## Using a different model or endpoint
+
+You can point the system at any OpenAI-compatible endpoint by changing `base_url` and `model` in `llm.py`. For example, to use the OpenAI API directly:
+
+```python llm.py
+llm = ChatOpenAI(
+    model="gpt-4o",
+    base_url="https://api.openai.com/v1",
+    api_key="sk-...",
+    temperature=0.3,
+    streaming=True
+)
+```
+
+Any provider that implements the OpenAI chat completions API — including Ollama, Together AI, and Groq — works the same way. Only `base_url`, `model`, and `api_key` need to change.

@@ -1,0 +1,164 @@
+---
+title: "Customize agent prompts, state fields, and LLM settings"
+description: "Modify agent prompts, add output fields to HiringState, and tune LLM temperature to tailor the multi-agent hiring workflow to your specific needs."
+---
+
+Every agent in this workflow is a plain Python function that constructs an f-string prompt, invokes the LLM, and returns a dict with one output field. Because all configuration lives directly in source code rather than a config file, customizing the workflow means editing Python — no framework-specific abstractions to learn. This page walks you through the three most common changes: editing a prompt, adding a new state field, and adjusting LLM behavior.
+
+## Changing an agent's prompt
+
+Each agent builds its prompt as an f-string and passes it to `llm.invoke()`. To change what an agent does, edit the text of that f-string.
+
+Here is the full prompt from `resume_parser_agent.py`:
+
+```python
+from llm import llm
+
+def resume_parser_agent(state):
+
+    resume_text = state["resume_text"]
+
+    response = llm.invoke(
+        f"""
+        You are a Resume Parsing Agent.
+
+        Extract structured candidate information from this resume.
+
+        Resume:
+        {resume_text}
+
+        Extract:
+        - candidate_name
+        - email
+        - phone
+        - skills
+        - frameworks
+        - experience
+        - projects
+        - education
+        - certifications
+        - github
+        - linkedin
+        - current_role
+        - seniority_level
+
+        Return structured JSON only.
+        """
+    )
+
+    return {
+        "candidate_profile": response.content
+    }
+```
+
+To add a new extraction field — for example, `languages_spoken` — append it to the `Extract:` list:
+
+```python
+        Extract:
+        - candidate_name
+        - email
+        ...
+        - seniority_level
+        - languages_spoken   # <-- add here
+```
+
+To change the output format from JSON to a numbered list, replace `Return structured JSON only.` with your preferred instruction. Keep in mind that downstream agents (such as `matching` and `hr_interview`) read `candidate_profile` and expect JSON, so changing the format requires updating those agents too.
+
+## Adding output fields
+
+Follow these four steps any time you want a new agent to produce a new piece of data.
+
+<Steps>
+  <Step title="Add the field to HiringState">
+    Open `graph/state.py` and add your new field to the `HiringState` TypedDict. All fields are `Optional` by default because `total=False` is set on the class.
+
+    ```python
+    # graph/state.py
+    class HiringState(TypedDict, total=False):
+        # ... existing fields ...
+        salary_benchmark: str   # <-- new field
+    ```
+  </Step>
+
+  <Step title="Return the field from your agent">
+    In your agent function, add the new key to the returned dict.
+
+    ```python
+    return {
+        "salary_benchmark": response.content
+    }
+    ```
+
+    LangGraph merges this dict into the shared state, so all subsequent agents will see `salary_benchmark` available.
+  </Step>
+
+  <Step title="Register the field with the supervisor">
+    Open `agents/supervisor.py` and find the `agents_info` dict. Add your agent's entry (or update an existing one) so the supervisor knows what the agent provides and requires. This is how the supervisor decides whether the required inputs are available before routing.
+
+    ```python
+    agents_info = {
+        # ... existing entries ...
+        "salary_research": {
+            "purpose": "Researches market salary ranges for the role.",
+            "requires": ["jd_analysis"],
+            "provides": ["salary_benchmark"]
+        },
+    }
+    ```
+  </Step>
+
+  <Step title="Access the field in downstream agents or main.py">
+    Any agent that runs after your new agent can read the field from `state`:
+
+    ```python
+    salary_benchmark = state.get("salary_benchmark", "")
+    ```
+
+    To print it in `main.py`, add a branch to the output loop:
+
+    ```python
+    elif node == "salary_research":
+        print(state.get("salary_benchmark"))
+    ```
+  </Step>
+</Steps>
+
+## Adjusting LLM temperature
+
+The temperature is set in `llm.py`:
+
+```python
+from langchain_openai import ChatOpenAI
+
+llm = ChatOpenAI(
+    model="gemma-3-4b-it",
+    base_url="http://localhost:1234/v1",
+    api_key="lm-studio",
+    temperature=0.3,
+    streaming=True
+)
+```
+
+`temperature` controls randomness. The default `0.3` is a good balance for this workflow:
+
+- **Lower temperature (0.0–0.2)** — more deterministic output. Use this when agents must return valid JSON (such as `resume_parser` or `evaluation`). Malformed JSON causes the supervisor's `json.loads()` call to raise an exception and route to `finished` early.
+- **Higher temperature (0.5–0.9)** — more creative, varied output. Use this if you want the interview agents to generate more diverse questions across runs. Be aware that higher temperature also increases the chance of malformed JSON.
+
+Because all agents share the same `llm` instance, changing `temperature` in `llm.py` affects every agent. If you need different temperatures per agent, instantiate separate `ChatOpenAI` objects in individual agent files.
+
+## Changing the number of questions
+
+The `hr_interview_agent` prompt currently asks for 15 HR questions. To change that, open `agents/hr_interview_agent.py` and edit this line:
+
+```python
+        Generate:
+        - 15 HR questions    # <-- change the number here
+        - evaluation criteria
+        - red flags
+```
+
+The same pattern applies to `technical_interview_agent.py` and `ceo_interview_agent.py` — find the `Generate:` section and update the count.
+
+<Warning>
+Changing agent output field names requires updating every downstream agent that reads that field, plus the supervisor's `agents_info` registry. For example, renaming `candidate_profile` to `parsed_resume` requires edits in `matching_agent.py`, `hr_interview_agent.py`, `technical_interview_agent.py`, `ceo_interview_agent.py`, `candidate_research_agent.py`, `email_agent.py`, and the supervisor's `requires` lists.
+</Warning>

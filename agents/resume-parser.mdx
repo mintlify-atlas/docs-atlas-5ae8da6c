@@ -1,0 +1,116 @@
+---
+title: "Resume parser agent: extract structured candidate profiles"
+description: "The resume parser extracts a structured JSON candidate profile from raw resume text, capturing skills, experience, contact info, and seniority level."
+---
+
+The resume parser agent is the first specialist agent the supervisor calls. It receives the raw text extracted from a candidate's PDF resume — via PyMuPDF upstream — and asks the LLM to convert it into a structured JSON profile. Every downstream agent that needs candidate information reads from the `candidate_profile` field that this agent writes to state.
+
+## Source code
+
+```python
+from llm import llm
+
+def resume_parser_agent(state):
+
+    resume_text = state["resume_text"]
+
+    response = llm.invoke(
+        f"""
+        You are a Resume Parsing Agent.
+
+        Extract structured candidate information from this resume.
+
+        Resume:
+        {resume_text}
+
+        Extract:
+        - candidate_name
+        - email
+        - phone
+        - skills
+        - frameworks
+        - experience
+        - projects
+        - education
+        - certifications
+        - github
+        - linkedin
+        - current_role
+        - seniority_level
+
+        Return structured JSON only.
+        """
+    )
+
+    return {
+        "candidate_profile": response.content
+    }
+```
+
+## Input
+
+The agent reads a single field from state:
+
+<ParamField path="resume_text" type="string" required>
+  Raw text extracted from the candidate's resume PDF. PyMuPDF handles the PDF-to-text conversion before the graph starts, and the result is stored in state under this key.
+</ParamField>
+
+## Output
+
+The agent writes a single field to state:
+
+<ResponseField name="candidate_profile" type="string">
+  A JSON string containing the structured candidate profile. All downstream agents that need candidate information — matching, research, interview question generators, evaluation, and email — read from this field.
+</ResponseField>
+
+The JSON contains the following fields:
+
+| Field | Description |
+|-------|-------------|
+| `candidate_name` | Full name as it appears on the resume |
+| `email` | Primary contact email |
+| `phone` | Contact phone number |
+| `skills` | List of technical skills |
+| `frameworks` | List of frameworks and libraries |
+| `experience` | Total years of professional experience |
+| `projects` | Notable projects mentioned in the resume |
+| `education` | Highest or most relevant qualification |
+| `certifications` | Professional certifications held |
+| `github` | GitHub profile URL or handle |
+| `linkedin` | LinkedIn profile URL or handle |
+| `current_role` | Most recent job title |
+| `seniority_level` | Inferred level (e.g., Junior, Mid, Senior, Staff) |
+
+## LLM prompt
+
+The prompt instructs the LLM to act as a Resume Parsing Agent and extract all thirteen fields from the raw `resume_text`. The prompt explicitly requests structured JSON only, which prevents the LLM from adding narrative explanation that would break downstream JSON parsing.
+
+## Example output structure
+
+```json
+{
+  "candidate_name": "Jane Smith",
+  "email": "jane@example.com",
+  "phone": "+1-555-0100",
+  "skills": ["Python", "FastAPI", "PostgreSQL", "Docker"],
+  "frameworks": ["LangChain", "FastAPI", "Celery"],
+  "experience": "5 years",
+  "projects": ["E-commerce platform", "ML pipeline"],
+  "education": "B.Tech Computer Science",
+  "certifications": ["AWS Solutions Architect"],
+  "github": "github.com/janesmith",
+  "linkedin": "linkedin.com/in/janesmith",
+  "current_role": "Senior Backend Engineer",
+  "seniority_level": "Senior"
+}
+```
+
+## State diagram
+
+```
+Requires: resume_text
+    ↓
+resume_parser_agent
+    ↓
+Provides: candidate_profile
+```

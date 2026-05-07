@@ -1,0 +1,83 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "LangChain Interview Multi-Agents Flow",
+  "projectDescription": "A LangGraph-powered multi-agent system that automates the end-to-end hiring workflow — from resume parsing and job description analysis through multi-round interview generation to candidate evaluation and email drafting.",
+  "theme": "luma",
+  "primaryColor": "#6C47FF",
+  "lightColor": "#EDE9FF",
+  "darkColor": "#3B1FA8",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "configuration"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/workflow-graph",
+              "architecture/state-management"
+            ]
+          },
+          {
+            "group": "Agents",
+            "pages": [
+              "agents/supervisor",
+              "agents/resume-parser",
+              "agents/jd-analysis",
+              "agents/matching",
+              "agents/candidate-research",
+              "agents/interview-agents",
+              "agents/evaluation",
+              "agents/email"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/running-the-workflow",
+              "guides/customizing-agents",
+              "guides/local-llm-setup",
+              "guides/extending-the-graph"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Supervisor-orchestrated multi-agent pipeline using LangGraph StateGraph",
+    "Automated resume parsing extracts structured candidate profiles from PDF",
+    "Job description analysis identifies required skills, seniority, and hiring priorities",
+    "Candidate-JD matching scores fit across technical, experience, leadership, and communication dimensions",
+    "Multi-round interview question generation: HR, Technical (Principal level), and CEO rounds",
+    "Candidate research agent provides strategic interview insights and preparation recommendations",
+    "Final evaluation agent synthesizes all agent outputs into an overall hiring verdict",
+    "Email agent drafts personalized outreach emails for each interviewer",
+    "Loop-detection guardrails in the supervisor prevent infinite agent cycles",
+    "Pluggable local LLM support via LM Studio and LangChain's ChatOpenAI interface"
+  ],
+  "publicApiSurface": [
+    "app (graph.workflow) — compiled LangGraph app, entry point for streaming the hiring workflow",
+    "HiringState (graph.state) — TypedDict defining the full shared workflow state",
+    "supervisor_agent(state) — orchestrator that routes between agents and detects loops",
+    "resume_parser_agent(state) — extracts structured candidate profile from resume text",
+    "jd_analysis_agent(state) — extracts structured JD requirements from raw job description",
+    "matching_agent(state) — scores candidate-JD fit across multiple dimensions",
+    "candidate_research_agent(state) — generates strategic interview insights",
+    "hr_interview_agent(state) — produces 15 HR interview questions with evaluation criteria",
+    "technical_interview_agent(state) — produces 20 technical questions with expected answers",
+    "ceo_interview_agent(state) — produces 10 executive-level questions with behavioral indicators",
+    "evaluation_agent(state) — synthesizes all data into a final hiring recommendation",
+    "email_agent(state) — drafts HR, technical, and CEO interviewer emails",
+    "extract_pdf_text(path) — utility to extract text from a resume PDF using PyMuPDF"
+  ]
+}

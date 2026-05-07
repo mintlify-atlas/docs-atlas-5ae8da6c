@@ -1,0 +1,134 @@
+---
+title: "Evaluation agent: generate the final hiring verdict"
+description: "The evaluation agent combines matching, research, and all three interview banks into a final verdict, confidence score, and hiring risks."
+---
+
+The evaluation agent is intentionally called last. It waits until all six of its required inputs are present in state before the supervisor routes to it. At that point it has a complete picture of the candidate: the parsed profile, the fit score, the research insights, and all three interview question banks. It synthesizes everything into a single structured output — the `evaluation` field — that the email agent then uses to draft the interviewer briefing emails.
+
+## Source code
+
+```python
+from llm import llm
+
+def evaluation_agent(state):
+
+    candidate_profile = state["candidate_profile"]
+    matching_analysis = state["matching_analysis"]
+    research_analysis = state["research_analysis"]
+    hr_questions = state["hr_questions"]
+    technical_questions = state["technical_questions"]
+    ceo_questions = state["ceo_questions"]
+
+    response = llm.invoke(
+        f"""
+        You are a Hiring Evaluation Agent.
+
+        Generate a final hiring evaluation.
+
+        Candidate:
+        {candidate_profile}
+
+        Matching Analysis:
+        {matching_analysis}
+
+        Research Analysis:
+        {research_analysis}
+
+        HR Questions:
+        {hr_questions}
+
+        Technical Questions:
+        {technical_questions}
+
+        CEO Questions:
+        {ceo_questions}
+
+        Generate:
+        - overall recommendation
+        - confidence score
+        - strengths
+        - concerns
+        - hiring risks
+        - final verdict
+
+        Return structured JSON only.
+        """
+    )
+
+    return {
+        "evaluation": response.content
+    }
+```
+
+## Inputs
+
+All six fields must be present in state before the supervisor routes to this agent. Note that the supervisor's `agents_info` registry lists only five `requires` fields (`matching_analysis`, `research_analysis`, `hr_questions`, `technical_questions`, `ceo_questions`) — `candidate_profile` is omitted from the registry but is still read directly by the agent function. In practice, `candidate_profile` is always available before evaluation is called since it is one of the first fields produced.
+
+<ParamField path="candidate_profile" type="string" required>
+  The structured JSON profile produced by the resume parser agent.
+</ParamField>
+
+<ParamField path="matching_analysis" type="string" required>
+  The fit score, strengths, weaknesses, and recommendation produced by the matching agent.
+</ParamField>
+
+<ParamField path="research_analysis" type="string" required>
+  The strategic interview insights produced by the candidate research agent.
+</ParamField>
+
+<ParamField path="hr_questions" type="string" required>
+  The 15-question HR bank with evaluation criteria and red flags.
+</ParamField>
+
+<ParamField path="technical_questions" type="string" required>
+  The 20-question technical bank with expected answers, follow-ups, and difficulty ratings.
+</ParamField>
+
+<ParamField path="ceo_questions" type="string" required>
+  The 10-question CEO bank with leadership criteria, behavioral indicators, and red flags.
+</ParamField>
+
+## Output
+
+<ResponseField name="evaluation" type="string">
+  A JSON string containing the final hiring recommendation. Read by the email agent to generate the interviewer briefing emails.
+</ResponseField>
+
+The JSON contains the following fields:
+
+| Field | Description |
+|-------|-------------|
+| `overall_recommendation` | A label such as "Strong Hire", "Hire", "No Hire", or "Strong No Hire" |
+| `confidence_score` | A numeric score (0–100) reflecting how confident the LLM is in the recommendation |
+| `strengths` | A list of the candidate's standout qualities relative to the role |
+| `concerns` | Areas where the candidate falls short of the role's expectations |
+| `hiring_risks` | Specific risks that could affect the candidate's success in the role |
+| `final_verdict` | A prose summary of the recommendation with actionable next steps |
+
+## Example output
+
+```json
+{
+  "overall_recommendation": "Strong Hire",
+  "confidence_score": 82,
+  "strengths": ["Deep Python expertise", "Solid system design foundation"],
+  "concerns": ["Limited cloud-native experience"],
+  "hiring_risks": ["May require ramp-up on Kubernetes"],
+  "final_verdict": "Recommend proceeding with offer subject to successful technical round"
+}
+```
+
+## State diagram
+
+```
+Requires: candidate_profile, matching_analysis, research_analysis,
+          hr_questions, technical_questions, ceo_questions
+    ↓
+evaluation_agent
+    ↓
+Provides: evaluation
+```
+
+<Note>
+  The evaluation agent requires all six inputs to be present in state before it is called. The supervisor's input validation ensures this.
+</Note>

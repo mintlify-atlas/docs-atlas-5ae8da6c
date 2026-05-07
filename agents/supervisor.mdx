@@ -1,0 +1,155 @@
+---
+title: "Supervisor agent: orchestrate the multi-agent pipeline"
+description: "Routes between specialist agents, validates required inputs, and applies call-count guardrails to prevent the hiring workflow from entering infinite loops."
+---
+
+The supervisor agent is the entry point of the hiring workflow. Every time the graph needs to decide what to do next, control passes back to the supervisor. It reads the current state, inspects which data is already available, consults the LLM, and returns the name of the next agent to call — or `"finished"` when the pipeline is complete. Because routing logic lives in the LLM rather than in hard-coded conditionals, the supervisor can handle partial failures and unexpected state gracefully without you writing extra branches.
+
+## How it works
+
+<Steps>
+  <Step title="Read workflow history">
+    The supervisor loads `workflow_history` from state — a flat list of every agent name called so far. This list feeds both the LLM prompt and the loop-detection guardrail.
+  </Step>
+  <Step title="Build the agent registry">
+    A local `agents_info` dict is constructed on every call. It lists all nine agents with their `purpose`, `requires`, and `provides` fields. The LLM receives this registry as JSON so it can reason about what is available and what is still missing.
+  </Step>
+  <Step title="Check available data">
+    The supervisor scans the current state and collects every key that is non-empty and is not a workflow-control field (`task`, `next_agent`, `workflow_stage`, `completed`, `error`, `workflow_history`). The resulting list becomes `available_data` in the prompt.
+  </Step>
+  <Step title="Call the LLM">
+    A structured prompt is built with the task, current state summary, call counts, the full agent registry, and guardrail instructions. The LLM is asked to return a JSON object with `reasoning`, `next_agent`, and `input_check`.
+  </Step>
+  <Step title="Parse the JSON response">
+    The raw response content is stripped of any markdown fences, then parsed with `json.loads`. The `next_agent` and `reasoning` fields are extracted.
+  </Step>
+  <Step title="Apply the loop guardrail">
+    Before returning, the supervisor checks whether the LLM chose an agent that has been called three or more times and whose output is still absent from state. If so, it overrides the decision and routes to `"finished"`.
+  </Step>
+</Steps>
+
+## Agent registry
+
+The `agents_info` dictionary is built fresh on every supervisor call and sent to the LLM as JSON. It covers all nine specialist agents:
+
+```python
+agents_info = {
+    "resume_parser": {
+        "purpose": "Parses raw resume text into a structured profile.",
+        "requires": ["resume_text"],
+        "provides": ["candidate_profile"]
+    },
+    "jd_analysis": {
+        "purpose": "Analyzes raw job description text.",
+        "requires": ["jd_text"],
+        "provides": ["jd_analysis"]
+    },
+    "matching": {
+        "purpose": "Matches candidate profile against JD analysis.",
+        "requires": ["candidate_profile", "jd_analysis"],
+        "provides": ["matching_analysis"]
+    },
+    "candidate_research": {
+        "purpose": "Researches the candidate's background and online presence.",
+        "requires": ["candidate_profile"],
+        "provides": ["research_analysis"]
+    },
+    "hr_interview": {
+        "purpose": "Generates HR-related interview questions.",
+        "requires": ["candidate_profile", "jd_analysis"],
+        "provides": ["hr_questions"]
+    },
+    "technical_interview": {
+        "purpose": "Generates technical interview questions.",
+        "requires": ["candidate_profile", "jd_analysis"],
+        "provides": ["technical_questions"]
+    },
+    "ceo_interview": {
+        "purpose": "Generates CEO/Culture fit interview questions.",
+        "requires": ["candidate_profile", "jd_analysis"],
+        "provides": ["ceo_questions"]
+    },
+    "evaluation": {
+        "purpose": "Provides a final hiring evaluation based on all gathered data.",
+        "requires": ["matching_analysis", "research_analysis", "hr_questions", "technical_questions", "ceo_questions"],
+        "provides": ["evaluation"]
+    },
+    "email": {
+        "purpose": "Drafts an email to the candidate or hiring manager based on the evaluation.",
+        "requires": ["evaluation", "candidate_profile"],
+        "provides": ["email_content"]
+    }
+}
+```
+
+## Loop detection guardrail
+
+The supervisor tracks how many times each agent has been called by counting occurrences in `workflow_history`:
+
+```python
+call_counts = {}
+for agent in history:
+    call_counts[agent] = call_counts.get(agent, 0) + 1
+
+flagged_agents = [agent for agent, count in call_counts.items() if count >= 3]
+```
+
+Even if the LLM ignores the flagged agents listed in the prompt, a hard override runs after the LLM response is parsed:
+
+```python
+if next_agent in flagged_agents and next_agent not in available_data:
+    print(f"[SUPERVISOR GUARDRAIL] Detected infinite loop for {next_agent}. Forcing termination.")
+    next_agent = "finished"
+    reasoning = f"LOOP DETECTED: {next_agent} failed multiple times. Terminating to avoid infinite loop."
+```
+
+The guard fires only when an agent is both flagged *and* has not yet produced its expected output — meaning the agent has been tried repeatedly without success.
+
+## LLM prompt
+
+The supervisor sends a single structured prompt that includes:
+
+- **TASK** — the free-text task string from state (e.g., `"Run the full hiring pipeline"`)
+- **CURRENT STATE** — the `available_data` list, the last five entries of `workflow_history`, and the full `call_counts` dict
+- **AGENT REGISTRY** — the `agents_info` dict serialized as pretty-printed JSON
+- **GUARDRAILS** — a plain-English description of the loop-prevention rules, including the current `flagged_agents` list
+- **RESPONSIBILITIES** — instructions to verify that all `requires` fields for the chosen agent are present in `available_data`, and to route to `"finished"` once `email_content` is present
+
+## Response format
+
+The supervisor expects the LLM to return a JSON object with exactly three fields:
+
+```json
+{
+  "reasoning": "Explain why you chose the next agent. If you are breaking a loop, explain why.",
+  "next_agent": "agent_name or 'finished'",
+  "input_check": "Validation of inputs."
+}
+```
+
+The supervisor uses `next_agent` to route the graph and logs `reasoning` to stdout. The `input_check` field is informational and is not used programmatically.
+
+## State inputs and outputs
+
+| Direction | Fields |
+|-----------|--------|
+| **Reads** | `task`, all state fields (presence check), `workflow_history` |
+| **Writes** | `next_agent`, `workflow_stage`, `workflow_history` |
+
+`workflow_history` is extended with the chosen `next_agent` on every successful call, unless the decision is `"finished"`.
+
+## Error handling
+
+If `json.loads` raises an exception — for example because the LLM returned plain text instead of JSON — the supervisor catches it and immediately routes to `"finished"` with the error stored in state:
+
+```python
+except Exception as e:
+    print(f"[SUPERVISOR ERROR] Failed to parse decision: {e}")
+    return {"next_agent": "finished", "error": str(e)}
+```
+
+This prevents the graph from hanging on a bad LLM response.
+
+<Note>
+  The supervisor uses the LLM to make routing decisions, not hardcoded logic. This makes it flexible but means the quality of routing depends on the model's instruction-following ability.
+</Note>

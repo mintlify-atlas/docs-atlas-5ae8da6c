@@ -1,0 +1,121 @@
+---
+title: "Set up and connect a local LLM via LM Studio"
+description: "Configure LM Studio to serve a local model on an OpenAI-compatible endpoint, then point the multi-agent hiring workflow at your local server."
+---
+
+This project uses a locally-hosted language model instead of a cloud API. Running the LLM locally means resume data and job descriptions never leave your machine — important for hiring workflows that handle personally identifiable information. It also removes per-token API costs, which matters when running long multi-agent pipelines that invoke the LLM once per agent per run. LM Studio provides a lightweight desktop application that loads open-weight models and exposes them on an OpenAI-compatible HTTP server, so the existing `ChatOpenAI` client in `llm.py` works without modification.
+
+## Set up LM Studio and start the server
+
+<Steps>
+  <Step title="Download LM Studio">
+    Go to [lmstudio.ai](https://lmstudio.ai) and download the installer for your operating system. LM Studio supports macOS, Windows, and Linux. Install and launch it.
+  </Step>
+
+  <Step title="Load a model">
+    In the LM Studio interface, search for and download an instruction-tuned model. The workflow is configured for `gemma-3-4b-it` by default, which runs comfortably on machines with 8 GB of RAM. For better JSON output quality — especially from the supervisor — a 7B or larger model is recommended.
+
+    Instruction-tuned models (those with `-it`, `-instruct`, or `-chat` in their name) follow prompts more reliably than base models. Avoid base models for this workflow.
+  </Step>
+
+  <Step title="Start the local server">
+    In LM Studio, open the **Local Server** tab (the `<->` icon in the left sidebar). Select the model you loaded, then click **Start Server**. By default the server listens on `http://localhost:1234`. Leave the default port unless you have a conflict.
+  </Step>
+
+  <Step title="Verify the endpoint is live">
+    With the server running, confirm it responds correctly:
+
+    ```bash
+    curl http://localhost:1234/v1/models
+    ```
+
+    You should see a JSON response listing the loaded model. If you get a connection refused error, check that the LM Studio server is started and the port matches.
+  </Step>
+
+  <Step title="Update llm.py if needed">
+    If you use a different model name or port, open `llm.py` and update the relevant fields:
+
+    ```python
+    llm = ChatOpenAI(
+        model="your-model-name-here",        # must match the name shown in LM Studio
+        base_url="http://localhost:1234/v1",  # update port if you changed it
+        api_key="lm-studio",
+        temperature=0.3,
+        streaming=True
+    )
+    ```
+  </Step>
+</Steps>
+
+## Understanding the llm.py configuration
+
+```python
+from langchain_openai import ChatOpenAI
+
+llm = ChatOpenAI(
+    model="gemma-3-4b-it",
+    base_url="http://localhost:1234/v1",
+    api_key="lm-studio",
+    temperature=0.3,
+    streaming=True
+)
+```
+
+| Field | Value | Purpose |
+|---|---|---|
+| `model` | `"gemma-3-4b-it"` | The model identifier sent in each API request. Must match exactly what LM Studio reports. |
+| `base_url` | `"http://localhost:1234/v1"` | Points the client at the local server instead of OpenAI's cloud. |
+| `api_key` | `"lm-studio"` | LM Studio requires a non-empty string; the value is ignored. |
+| `temperature` | `0.3` | Controls output randomness. Lower values produce more consistent JSON. |
+| `streaming` | `True` | Streams tokens as they are generated. Required for LangGraph's streaming mode to work correctly. |
+
+## Using a different provider
+
+Because the client uses the standard OpenAI API interface, you can swap `base_url` to point at any compatible server.
+
+<CodeGroup>
+
+```python OpenAI cloud
+from langchain_openai import ChatOpenAI
+
+# OpenAI
+llm = ChatOpenAI(model="gpt-4o", api_key="sk-...")
+```
+
+```python Ollama
+from langchain_openai import ChatOpenAI
+
+# Ollama (run: ollama serve)
+llm = ChatOpenAI(
+    model="llama3",
+    base_url="http://localhost:11434/v1",
+    api_key="ollama"
+)
+```
+
+```python Other OpenAI-compatible server
+from langchain_openai import ChatOpenAI
+
+# Any OpenAI-compatible endpoint
+llm = ChatOpenAI(
+    model="your-model",
+    base_url="http://your-server:port/v1",
+    api_key="your-key"
+)
+```
+
+</CodeGroup>
+
+## Model recommendations
+
+| Model size | Suitability |
+|---|---|
+| 3B–4B | Adequate for single-output agents (resume parser, email). Struggles with complex routing logic in the supervisor. |
+| 7B | Good balance of speed and quality. Handles JSON output reliably on most agents. |
+| 13B+ | Best JSON consistency and supervisor reliability. Requires more RAM (16 GB+). |
+
+Instruction-tuned variants (those ending in `-it`, `-instruct`, or `-chat`) are required. Base models do not reliably follow the structured prompt format used by each agent.
+
+<Note>
+The workflow relies on the LLM returning valid JSON. If responses are malformed, the supervisor will catch parse errors and route to `finished`. Use a model with strong instruction-following. If you see the supervisor terminating early with a parse error, try switching to a larger or more capable model before changing the prompt.
+</Note>

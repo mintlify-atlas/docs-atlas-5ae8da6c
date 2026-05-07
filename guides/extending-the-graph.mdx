@@ -1,0 +1,148 @@
+---
+title: "Add or remove specialist agents from the graph"
+description: "Learn how to add a new specialist agent to the LangGraph StateGraph, register it with the supervisor, and wire it into the routing logic."
+---
+
+The workflow is a `StateGraph` where every node is a plain Python function and routing decisions are made by the supervisor agent at runtime. Adding a new specialist agent follows a consistent four-file pattern: create the agent function, extend `HiringState` with its output field, register the node and its edges in `workflow.py`, and tell the supervisor about it in `agents_info`. Because the supervisor reads the registry at runtime to decide routing, no changes to the supervisor's core logic are needed — only its configuration dict.
+
+## Add a new agent
+
+<Steps>
+  <Step title="Create the agent function">
+    Create a new Python file in the `agents/` directory. Follow the same structure as the existing agents: import `llm`, define a function that accepts `state`, build a prompt using f-string interpolation, invoke the LLM, and return a dict with a single output key.
+
+    ```python
+    # agents/salary_research_agent.py
+    from llm import llm
+
+    def salary_research_agent(state):
+        jd_analysis = state["jd_analysis"]
+        candidate_profile = state["candidate_profile"]
+
+        response = llm.invoke(
+            f"""
+            You are a Salary Research Agent.
+
+            Based on the job description and candidate profile below,
+            provide a market salary benchmark for this role and candidate level.
+
+            Job Description Analysis:
+            {jd_analysis}
+
+            Candidate Profile:
+            {candidate_profile}
+
+            Return structured JSON with: min_salary, max_salary, median_salary, currency, notes.
+            """
+        )
+
+        return {"salary_benchmark": response.content}
+    ```
+
+    Keep each agent focused on a single responsibility and a single output field. The supervisor routes more reliably when agents have narrow, well-defined outputs.
+  </Step>
+
+  <Step title="Add the output field to HiringState">
+    Open `graph/state.py` and add the new field to the `HiringState` TypedDict. Because `total=False` is set on the class, all fields are implicitly optional — you do not need to wrap the type in `Optional`.
+
+    ```python
+    # graph/state.py
+    from typing_extensions import TypedDict
+    from typing import Optional
+
+    class HiringState(TypedDict, total=False):
+        # ... existing fields ...
+        salary_benchmark: str   # output from salary_research_agent
+    ```
+  </Step>
+
+  <Step title="Register the node and edges in workflow.py">
+    Open `graph/workflow.py`. Import your new agent, add it as a node, and add an edge that returns control to the supervisor after the agent completes.
+
+    ```python
+    # graph/workflow.py
+    from agents.salary_research_agent import salary_research_agent
+
+    # Add the node
+    graph.add_node("salary_research", salary_research_agent)
+
+    # Return to supervisor after this agent completes
+    graph.add_edge("salary_research", "supervisor")
+    ```
+
+    Then add the new agent's key to the routing dict inside `add_conditional_edges`:
+
+    ```python
+    graph.add_conditional_edges(
+        "supervisor",
+        router,
+        {
+            "resume_parser": "resume_parser",
+            "jd_analysis": "jd_analysis",
+            # ... existing entries ...
+            "salary_research": "salary_research",   # <-- add here
+            "finished": END
+        }
+    )
+    ```
+  </Step>
+
+  <Step title="Register the agent with the supervisor">
+    Open `agents/supervisor.py` and add an entry to the `agents_info` dict. The `requires` list must match existing field names in `HiringState`. The `provides` list must match the key your agent returns.
+
+    ```python
+    # agents/supervisor.py
+    agents_info = {
+        # ... existing entries ...
+        "salary_research": {
+            "purpose": "Researches market salary benchmarks for the role and candidate level.",
+            "requires": ["jd_analysis", "candidate_profile"],
+            "provides": ["salary_benchmark"]
+        },
+    }
+    ```
+
+    The supervisor checks `requires` against available state data before routing. If any required field is missing, the supervisor will route to a different agent first.
+  </Step>
+</Steps>
+
+## Print the new agent's output in main.py
+
+To see the output in the streaming loop, add a branch to the inner loop in `main.py`:
+
+```python
+elif node == "salary_research":
+    print(state.get("salary_benchmark"))
+```
+
+## Removing an agent
+
+To remove an existing agent from the workflow:
+
+1. Delete or comment out the `graph.add_node(...)` and `graph.add_edge(...)` lines for that agent in `workflow.py`.
+2. Remove the agent's key from the routing dict in `add_conditional_edges`.
+3. Remove the agent's entry from `agents_info` in `supervisor.py`.
+4. Remove the agent's output field from `HiringState` in `graph/state.py`.
+5. Remove any references to that field in downstream agents that previously read it.
+
+If you remove an agent whose output is required by another agent (for example, removing `jd_analysis` when `matching` requires `jd_analysis`), the supervisor will be unable to route to `matching` and will eventually route to `finished` after detecting the missing input.
+
+<Tip>
+Keep each agent focused on a single output. The supervisor is more reliable when agents have clear, narrow responsibilities. A single agent that returns five fields is harder for the supervisor to reason about than five agents that each return one field.
+</Tip>
+
+<Note>
+After adding a new agent, test it with a simple prompt first before integrating into the full pipeline. Call the agent function directly with a hand-crafted state dict and inspect the output to confirm it returns valid JSON before wiring it into the graph.
+
+```python
+# Quick smoke test — run this standalone before wiring into workflow.py
+from agents.salary_research_agent import salary_research_agent
+
+test_state = {
+    "jd_analysis": '{"role": "Senior Engineer", "skills": ["Python"]}',
+    "candidate_profile": '{"name": "Jane Doe", "seniority_level": "Senior"}'
+}
+result = salary_research_agent(test_state)
+print(result["salary_benchmark"])
+```
+</Note>

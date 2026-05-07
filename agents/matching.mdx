@@ -1,0 +1,101 @@
+---
+title: "Matching agent: score candidate fit against the JD"
+description: "Compares a candidate profile to the JD analysis across technical, experience, leadership, and communication dimensions, producing a fit score and recommendation."
+---
+
+The matching agent is the first agent that requires outputs from both parsing agents. It takes the structured `candidate_profile` and `jd_analysis` and asks the LLM to evaluate the candidate across four dimensions, then produce a single fit score. The resulting `matching_analysis` is a key input for the evaluation agent, which uses it alongside interview question banks to form the final hiring recommendation.
+
+## Source code
+
+```python
+from llm import llm
+
+
+def matching_agent(state):
+
+    candidate_profile = state["candidate_profile"]
+
+    jd_analysis = state["jd_analysis"]
+
+    response = llm.invoke(
+        f"""
+        You are a Candidate Matching Agent.
+
+        Compare the candidate profile with the job description.
+
+        Candidate Profile:
+        {candidate_profile}
+
+        Job Description Analysis:
+        {jd_analysis}
+
+        Evaluate:
+        - technical fit
+        - experience fit
+        - leadership fit
+        - communication fit
+
+        Return:
+        - fit_score
+        - strengths
+        - weaknesses
+        - missing_skills
+        - recommendation
+
+        Return structured JSON only.
+        """
+    )
+
+    return {
+        "matching_analysis": response.content
+    }
+```
+
+## Inputs
+
+<ParamField path="candidate_profile" type="string" required>
+  The structured JSON profile produced by the resume parser agent.
+</ParamField>
+
+<ParamField path="jd_analysis" type="string" required>
+  The structured JSON analysis produced by the JD analysis agent.
+</ParamField>
+
+## Output
+
+<ResponseField name="matching_analysis" type="string">
+  A JSON string containing the fit score, strengths, weaknesses, missing skills, and a routing recommendation. Read by the evaluation agent.
+</ResponseField>
+
+## Four evaluation dimensions
+
+The prompt asks the LLM to evaluate the candidate across four dimensions before producing the overall score:
+
+| Dimension | What it assesses |
+|-----------|-----------------|
+| **Technical fit** | Overlap between the candidate's skills and frameworks versus the JD's required and preferred skills |
+| **Experience fit** | Whether the candidate's years of experience and seniority level match the role's expectations |
+| **Leadership fit** | Whether the candidate's background meets any people management or mentoring requirements in the JD |
+| **Communication fit** | Inferred from the resume's project descriptions, roles, and context — does the candidate appear to operate at the right communication level for the role |
+
+## Example output
+
+```json
+{
+  "fit_score": 78,
+  "strengths": ["Strong Python skills", "Relevant cloud experience"],
+  "weaknesses": ["No Kubernetes experience"],
+  "missing_skills": ["Kubernetes", "GraphQL"],
+  "recommendation": "Proceed to technical interview with focus on system design"
+}
+```
+
+## State diagram
+
+```
+Requires: candidate_profile, jd_analysis
+    ↓
+matching_agent
+    ↓
+Provides: matching_analysis
+```

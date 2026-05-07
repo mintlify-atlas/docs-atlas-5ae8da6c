@@ -1,81 +1,110 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
-icon: 'rocket'
+title: "Quickstart: run your first multi-agent hiring workflow"
+description: "Run the full AI-powered hiring workflow against a real resume and job description in minutes, using LangGraph and a local LLM served by LM Studio."
 ---
 
-## Get started in three steps
+This guide walks you through cloning the project, installing dependencies, configuring LM Studio, and running the multi-agent hiring workflow end to end. By the end you will have streamed a complete hiring analysis — candidate profile, matching, interview questions, evaluation, and email draft — from your local machine.
 
-Get your documentation site running locally and make your first customization.
+<Warning>
+  Ensure LM Studio has a model loaded and running before starting. The workflow will fail if the LLM endpoint is unreachable.
+</Warning>
 
-### Step 1: Set up your local environment
+<Steps>
+  <Step title="Clone the repository">
+    Clone the project and move into the project directory:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```bash
+    git clone https://github.com/vrashmanyu605-eng/Langchain_Interview_Multi_Agents_Flow.git && cd Langchain_Interview_Multi_Agents_Flow
+    ```
+  </Step>
 
-### Step 2: Deploy your changes
+  <Step title="Install dependencies">
+    Install the required Python packages:
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    <CodeGroup>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    ```bash pip
+    pip install langchain-openai langgraph pymupdf
+    ```
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```bash pip3
+    pip3 install langchain-openai langgraph pymupdf
+    ```
 
-### Step 3: Go live
+    </CodeGroup>
+  </Step>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+  <Step title="Set up LM Studio">
+    Download [LM Studio](https://lmstudio.ai) and load a model. The project defaults to `gemma-3-4b-it`, but any instruction-tuned model with an OpenAI-compatible server works.
 
-## Next steps
+    Once you have a model loaded, start the local server from LM Studio's **Local Server** tab. By default it serves at `http://localhost:1234/v1`. Keep LM Studio running throughout the workflow.
 
-Now that you have your docs running, explore these key features:
+    <Tip>
+      Start with a well-formatted PDF resume for best extraction results.
+    </Tip>
+  </Step>
 
-<CardGroup cols={2}>
+  <Step title="Configure the LLM">
+    Open `llm.py` and confirm (or update) the model name and endpoint to match your LM Studio setup:
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+    ```python llm.py
+    from langchain_openai import ChatOpenAI
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+    llm = ChatOpenAI(
+        model="gemma-3-4b-it",
+        base_url="http://localhost:1234/v1",
+        api_key="lm-studio",
+        temperature=0.3,
+        streaming=True
+    )
+    ```
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+    Change `model` to match the model identifier shown in LM Studio if you loaded a different model. See [configuration](/configuration) for a full description of each parameter.
+  </Step>
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+  <Step title="Update input file paths">
+    Open `main.py` and replace the placeholder paths with absolute paths to your own files:
 
-</CardGroup>
+    ```python main.py
+    resume_pdf_path = "path/to/your/resume.pdf"
+    jd_text_path = "path/to/your/job_description.txt"
+    ```
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+    - `resume_pdf_path` — the absolute path to the candidate's PDF resume
+    - `jd_text_path` — the absolute path to a plain-text job description file
+  </Step>
+
+  <Step title="Run the workflow">
+    Start the multi-agent pipeline:
+
+    ```bash
+    python main.py
+    ```
+
+    The workflow streams results node by node to your terminal as each agent completes its task.
+  </Step>
+
+  <Step title="Read the output">
+    Each agent prints a separator block with its node name followed by its output. The supervisor prints the next agent it has chosen; all other agents print the relevant state field they populated.
+
+    ```text
+    ====================================
+    NODE: SUPERVISOR
+    Next Agent: resume_parser
+
+    ====================================
+    NODE: RESUME_PARSER
+    {"candidate_name": "Jane Smith", "email": "jane@example.com", ...}
+
+    ====================================
+    NODE: SUPERVISOR
+    Next Agent: jd_analysis
+
+    ====================================
+    NODE: JD_ANALYSIS
+    {"required_skills": ["Python", "LangChain", ...], "experience": "3+ years", ...}
+    ```
+
+    The workflow continues through matching, research, the three interview agents, evaluation, and finally the email agent before the supervisor routes to `finished` and the stream ends.
+  </Step>
+</Steps>
